@@ -4,7 +4,7 @@ import random
 import numpy as np
 import os
 import torch
-from moviepy import VideoFileClip
+from moviepy.editor import VideoFileClip
 from torch.utils.data import Dataset
 from torchvision import transforms
 
@@ -16,15 +16,14 @@ class VideoDataset(Dataset):
     Every highlight clip should start with HL and non highlight should start with NOHL
     """
 
-    def __init__(self, path, max_len, train=False):
+    def __init__(self, path, train=False):
         self.train = train
-        self.max_len = max_len
 
         with open(path, 'r') as f:
             self.clips = f.read().splitlines()
 
     def __len__(self):
-        return len(self.input_files)
+        return len(self.clips)
 
     def __getitem__(self, idx):
         clip = VideoFileClip(self.clips[idx])
@@ -39,19 +38,21 @@ class VideoDataset(Dataset):
         for i, frame in enumerate(clip.iter_frames(fps=1)):
             frames[i] = frame
 
-        return frames, volumes
+        label = 1 if os.path.basename(self.clips[idx])[:2] == "HL" else 0
+
+        return frames, volumes, label
 
 
 def initialize_loaders(args):
     kwargs = {'num_workers': args.workers, 'pin_memory': True} if args.cuda else {}
 
     train_loader = torch.utils.data.DataLoader(
-        VideoDataset(args.train_data,args.max_len,train=True),
+        VideoDataset(args.train_data, train=True),
         batch_size=args.batch_size,
         shuffle=True, **kwargs)
 
     test_loader = torch.utils.data.DataLoader(
-        VideoDataset(args.test_data,args.max_len,train=False),
+        VideoDataset(args.test_data,train=False),
         batch_size=args.batch_size,
         shuffle=True, **kwargs)
 

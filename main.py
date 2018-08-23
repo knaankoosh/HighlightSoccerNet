@@ -46,8 +46,7 @@ def parse_args():
     parser.add_argument('--manualSeed', type=int, default=1234, help='manual seed')
 
     # loading pretrained nets
-    parser.add_argument('--netG', default='', help="path to netG (to continue training)")
-    parser.add_argument('--netD', default='', help="path to netD (to continue training)")
+    parser.add_argument('--net', default='', help="path to netG (to continue training)")
     parser.add_argument('--benchmark', action='store_true', help="enables benchmarking")
 
     # GPU args
@@ -58,7 +57,7 @@ def parse_args():
     # Data pipeline and data augmentation
     data_grp = parser.add_argument_group('data pipeline')
     data_grp.add_argument('--workers', type=int, help='number of data loading workers', default=4)
-    data_grp.add_argument('--batch_size', default=30, type=int, help='size of a batch for each gradient update.')
+    data_grp.add_argument('--batch_size', default=2, type=int, help='size of a batch for each gradient update.')
     data_grp.add_argument('--rotate', action="store_true", help='rotate data augmentation.')
     data_grp.add_argument('--flipud', action="store_true", help='flip up/down data augmentation.')
     data_grp.add_argument('--fliplr', action="store_true", help='flip left/right data augmentation.')

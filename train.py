@@ -9,88 +9,65 @@ from tqdm import tqdm
 
 from data import initialize_loaders
 from main import setup_main, to_variables, ModelSaver, update_stats
-import models
+from models import crNN
 
+def load_or_init_models(model, opt):
+    if opt.net != '':
+        model.load_state_dict(torch.load(opt.net))
+    return model
 
-def trainG(generator, criterion_GAN, criterion_pixelwise, optimizer, data, opt, lambda_pixel=100):
-    generator.train()
+def train(net, criterion, optimizer, data, opt, lambda_pixel=100):
+    net.train()
     optimizer.zero_grad()
 
-    x_hr, x_lr, y_hr, y_lr = data
+    batch_size, seq_len, H, W, C = data.size()
+    frames, volumes, labels = data
+    losses = torch.zeros(batch_size)
+    for i in range(batch_size):
+        frame = frames[i]
+        audio = volumes[i]
+        output = net(frame, audio)
+        losses[i] = criterion(output, labels[i])
 
-    # GAN loss
-    y_hat = generator(x_hr, x_lr)
-
-    # Pixel-wise loss
-    loss_pixel = criterion_pixelwise(y_hat, y_hr)
-
-    # Total loss
-    loss_G = lambda_pixel * loss_pixel
-
-    loss_G.backward()
+    losses.backward()
     optimizer.step()
 
-    return y_hat, {'loss_G': loss_G, 'loss_pixel': loss_pixel}
+    return losses
 
-def test(generator, criterion_pixelwise, data, opt, lambda_pixel=100):
-    generator.eval()
-    x_hr, x_lr, y_hr, y_lr = data
+def test(net, criterion, data, opt, lambda_pixel=100):
+    net.eval()
+    loss = 0
 
-
-    # GAN loss
-    y_hat = generator(x_hr, x_lr)
-
-    # Loss from discriminator
-
-    # Pixel-wise loss
-    loss_pixel = criterion_pixelwise(y_hat, y_hr)
-
-    # Total loss
-    loss_G = lambda_pixel * loss_pixel
-
-    return y_hat, {'loss_G': loss_G, 'loss_pixel': loss_pixel}
+    return loss
 
 
 def run(opt):
     train_loader, test_loader = initialize_loaders(opt)
 
-    # Initialize generator and discriminator
-    cNN = load_or_init_models(RetouchGenerator(opt.device), opt)
+    # Initialize net
+    net = load_or_init_models(crNN.crNN(130), opt)
 
     # Optimizers
-    optimizer_G = torch.optim.Adam(generator.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    # optimizer = torch.optim.Adam(net.cnn_params, lr=opt.lr, betas=(opt.b1, opt.b2))
+    # optimizer.add_param_group({'rnn_params': net.rnn_params})
+    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    net, criterion = to_variables((net, torch.nn.BCELoss()), cuda=opt.cuda, device=opt.device)
 
-    generator, criterion_GAN, criterion_pixelwise = to_variables((generator,
-                                                                  torch.nn.BCEWithLogitsLoss(),
-                                                                  torch.nn.MSELoss()),
-                                                                  cuda=opt.cuda,
-                                                                  device=opt.device)
+    net_saver = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
 
-    saverG = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
-    saverD = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
     train_writer = SummaryWriter(log_dir=os.path.join(opt.checkpoint_dir, 'train'))
     test_writer = SummaryWriter(log_dir=os.path.join(opt.checkpoint_dir, 'test'))
     prev_time = time.time()
 
     for epoch in tqdm(range(opt.epoch, opt.n_epochs), desc='Training'):
-
-        ####
-        # Train
-        ###
+        # Training
         avg_stats = defaultdict(float)
         for i, data in enumerate(train_loader):
             data = to_variables(data, cuda=opt.cuda, device=opt.device)
-            y_hat, loss_G = trainG(generator, criterion_GAN, criterion_pixelwise, optimizer_G, data, opt)
-            update_stats(avg_stats, loss_G)
+            loss = train(net, criterion, optimizer, data, opt)
+            update_stats(avg_stats, loss)
 
-            # Print image to tensorboard
-            if (epoch % opt.sample_interval == 0) and (i % 50 == 0):
-                train_writer.add_image('RetouchNet', y_hat[0], epoch)
-                train_writer.add_image('GroundTruth', data[0][0], epoch)
-                train_writer.add_image('raw', data[2][0], epoch)
-
-
-    # Log Progress
+        # Log training progress
         str_out = '[train] {}/{} '.format(epoch, opt.n_epochs)
         for k, v in avg_stats.items():
             avg = v / len(train_loader)
@@ -98,24 +75,15 @@ def run(opt):
             str_out += '{}: {:.6f}  '.format(k, avg)
         print(str_out)
 
-        ####
-        # Test
-        ###
+        # Testing
         avg_stats = defaultdict(float)
-        images = None
         with torch.no_grad():
             for i, data in enumerate(test_loader):
                 data = to_variables(data, cuda=opt.cuda, device=opt.device, test=True)
-                images, losses = test(generator, criterion_pixelwise, data, opt)
+                losses = test(net, criterion, data, opt)
                 update_stats(avg_stats, losses)
 
-                # Print image to tensorboard
-                if (epoch % opt.sample_interval == 0) and (i % 5 == 0):
-                    test_writer.add_image('RetouchNet', images[0], epoch)
-                    test_writer.add_image('GroundTruth', data[0][0], epoch)
-                    test_writer.add_image('raw', data[2][0], epoch)
-
-        # Log Progress
+        # Log testing progress
         str_out = '[test] {}/{} '.format(epoch, opt.n_epochs)
         for k, v in avg_stats.items():
             avg = v / len(test_loader)
@@ -125,7 +93,7 @@ def run(opt):
 
         if epoch % opt.checkpoint_interval == 0:
             # Save model checkpoints
-            saverG.save_if_best(generator, loss_G['loss_G'])
+            net_saver.save_if_best(net, losses)
 
 
 if __name__ == '__main__':

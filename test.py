@@ -1,7 +1,7 @@
 import numpy as np # for numerical operations
 from moviepy.editor import VideoFileClip
 
-clip = VideoFileClip(r"C:\Users\Room\Downloads\Matches\Highlights\liverpool-vs-west-ham\HL-liverpool-vs-west-ham_1.mp4")
+clip = VideoFileClip(r"C:\Users\zneb\Documents\GitHub\HighlightSoccerNet\data\HL\HL-liverpool-vs-west-ham_2.mp4")
 cut = lambda i: clip.audio.subclip(i,i+1).to_soundarray(fps=22000)
 volume = lambda array: np.sqrt(((1.0*array)**2).mean())
 volumes = [volume(cut(i)) for i in range(0,int(clip.duration-1))]
