@@ -20,10 +20,12 @@ def train(net, criterion, optimizer, data, opt, lambda_pixel=100):
     net.train()
     optimizer.zero_grad()
 
-    batch_size, seq_len, H, W, C = data.size()
     frames, volumes, labels = data
+    batch_size, seq_len, H, W, C = frames.size()
+
     losses = torch.zeros(batch_size)
     for i in range(batch_size):
+        print(i)
         frame = frames[i]
         audio = volumes[i]
         output = net(frame, audio)

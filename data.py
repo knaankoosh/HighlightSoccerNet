@@ -32,11 +32,13 @@ class VideoDataset(Dataset):
         cut = lambda i: clip.audio.subclip(i, i + 1).to_soundarray(fps=22000)
         volume = lambda array: np.sqrt(((1.0 * array) ** 2).mean())
         volumes = [volume(cut(i)) for i in range(0, int(clip.duration - 1))]
+        volumes = np.array(volumes, dtype='float32')
 
         # Video stream
         frames = np.zeros((int(clip.duration) + 1, clip.h, clip.w, 3))
         for i, frame in enumerate(clip.iter_frames(fps=1)):
             frames[i] = frame
+        frames = frames.transpose([0, 3, 1, 2]).astype('float32')
 
         label = 1 if os.path.basename(self.clips[idx])[:2] == "HL" else 0
 

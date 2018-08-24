@@ -8,7 +8,7 @@ class crNN(nn.Module):
         super(crNN, self).__init__()
 
         self.video_embedd = video_embedd
-        self.ResNet = resnet.resnet50(pretrained=False, num_classes=self.video_embedd)
+        self.ResNet = resnet.resnet18(pretrained=False, num_classes=self.video_embedd)
         self.RNN = nn.GRU(self.video_embedd + 1, 10, 2, batch_first=True)
 
         self.cnn_params = self.ResNet.parameters()
