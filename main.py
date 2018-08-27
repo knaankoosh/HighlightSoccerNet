@@ -7,21 +7,6 @@ import os
 import torch
 import torch.backends.cudnn as cudnn
 
-
-def setup_main():
-    opt = parse_args()
-    procname = os.path.basename(opt.checkpoint_dir)
-    setproctitle.setproctitle('retouchNet_{}'.format(procname))
-
-    opt.checkpoint_dir = os.path.join(opt.checkpoint_dir, opt.name)
-    print(f'Preparing summary and checkpoint directory {opt.checkpoint_dir}')
-    os.makedirs(opt.checkpoint_dir, exist_ok=True)
-    os.makedirs('%s/images/%s' % (opt.checkpoint_dir, opt.name), exist_ok=True)
-    opt = setup_cuda(opt)
-
-    print(opt)
-    return opt
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epoch', type=int, default=0, help='epoch to start training from')
@@ -42,11 +27,11 @@ def parse_args():
     parser.add_argument('--channels', type=int, default=3, help='number of image channels')
     parser.add_argument('--sample_interval', type=int, default=10,
                         help='interval between sampling of images from generators')
-    parser.add_argument('--checkpoint_interval', type=int, default=10, help='interval between model checkpoints')
+    parser.add_argument('--checkpoint_interval', type=int, default=1, help='interval between model checkpoints')
     parser.add_argument('--manualSeed', type=int, default=1234, help='manual seed')
 
     # loading pretrained nets
-    parser.add_argument('--net', default='', help="path to netG (to continue training)")
+    parser.add_argument('--net', default='', help="path to the pretrained model")
     parser.add_argument('--benchmark', action='store_true', help="enables benchmarking")
 
     # GPU args
@@ -64,11 +49,19 @@ def parse_args():
     data_grp.add_argument('--random_crop', action="store_true", help='random crop data augmentation.')
     return parser.parse_args()
 
-def seed_all(opt):
-    print("Random Seed: ", opt.manualSeed)
-    random.seed(opt.manualSeed)
-    np.random.seed(opt.manualSeed)
-    torch.manual_seed(opt.manualSeed)
+def setup_main():
+    opt = parse_args()
+    procname = os.path.basename(opt.checkpoint_dir)
+    setproctitle.setproctitle('retouchNet_{}'.format(procname))
+
+    opt.checkpoint_dir = os.path.join(opt.checkpoint_dir, opt.name)
+    print(f'Preparing summary and checkpoint directory {opt.checkpoint_dir}')
+    os.makedirs(opt.checkpoint_dir, exist_ok=True)
+    os.makedirs('%s/images/%s' % (opt.checkpoint_dir, opt.name), exist_ok=True)
+    opt = setup_cuda(opt)
+
+    print(opt)
+    return opt
 
 def to_variables(tensors, cuda=None, device=None, test=False, **kwargs):
     if cuda is None:
@@ -81,10 +74,6 @@ def to_variables(tensors, cuda=None, device=None, test=False, **kwargs):
             variables[-1].requires_grad = False
     return variables
 
-def update_stats(stats, measurments):
-    for k, v in measurments.items():
-        stats[k] += v
-    return stats
 
 def setup_cuda(opt):
     if torch.cuda.is_available() and opt.no_cuda:
@@ -122,6 +111,11 @@ def print_cuda():
     print('Active CUDA Device: GPU', torch.cuda.current_device())
     print('Available devices ', torch.cuda.device_count())
     print('Current cuda device ', torch.cuda.current_device())
+
+def update_stats(stats, measurments):
+    for k, v in measurments.items():
+        stats[k] += v
+    return stats
 
 class ModelSaver:
     def __init__(self, path):
