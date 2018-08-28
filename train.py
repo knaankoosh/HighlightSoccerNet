@@ -1,7 +1,5 @@
-import time
 import os
 import torch
-import torch.nn as nn
 import numpy as np
 from torch.autograd import Variable
 from collections import defaultdict
@@ -10,7 +8,89 @@ from tqdm import tqdm
 
 from data import initialize_loaders
 from main import setup_main, to_variables, ModelSaver, update_stats
-from models import crNN
+import models
+
+
+def run_audio(opt):
+    # Initialize DataLoaders
+    train_loader, test_loader = initialize_loaders(opt, type=1)
+
+    # Initialize Network
+    net = load_or_init_models(models.crNN_audio(1, 10, 2), opt).cuda()
+
+    # Optimizers
+    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    # optimizer = torch.optim.SGD(net.parameters(), lr=0.0002)
+    criterion = torch.nn.BCELoss()
+    net_saver = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
+
+    train_writer = SummaryWriter(log_dir=os.path.join(opt.checkpoint_dir, 'train'))
+    test_writer = SummaryWriter(log_dir=os.path.join(opt.checkpoint_dir, 'test'))
+
+    for epoch in tqdm(range(opt.epoch, opt.n_epochs), desc='Training'):
+        # Training
+        avg_stats = defaultdict(float)
+        for i, data in enumerate(train_loader):
+            loss, output = train_audio(net, criterion, optimizer, data, opt)
+            update_stats(avg_stats, loss)
+
+        # Log training progress
+        str_out = '[train] {}/{} '.format(epoch, opt.n_epochs)
+        for k, v in avg_stats.items():
+            avg = v / len(train_loader)
+            train_writer.add_scalar(k, avg, epoch)
+            str_out += '{}: {:.6f}  '.format(k, avg)
+        print(str_out)
+
+        # Testing
+        avg_stats = defaultdict(float)
+        with torch.no_grad():
+            for i, data in enumerate(test_loader):
+                loss, output = test_audio(net, criterion, data, opt)
+                update_stats(avg_stats, loss)
+
+        # Log testing progress
+        str_out = '[test] {}/{} '.format(epoch, opt.n_epochs)
+        avg = 0
+        for k, v in avg_stats.items():
+            avg = v / len(test_loader)
+            test_writer.add_scalar(k, avg, epoch)
+            str_out += '{}: {:.6f}  '.format(k, avg)
+        print(str_out)
+
+        if epoch % opt.checkpoint_interval == 0:
+            # Save model checkpoints
+            net_saver.save_if_best(net, avg)
+
+
+def train_audio(net, criterion, optimizer, data, opt):
+    net.train()
+    optimizer.zero_grad()
+
+    volumes, labels, lengths = data
+    if opt.cuda:
+        volumes = volumes.cuda()
+        labels = labels.cuda()
+
+    output = net(volumes*100, lengths)
+    losses = criterion(output, labels)
+    losses.backward()
+    optimizer.step()
+
+    return {'train loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}, output
+
+def test_audio(net, criterion, data, opt):
+    net.eval()
+
+    volumes, labels, lengths = data
+    if opt.cuda:
+        volumes = volumes.cuda()
+        labels = labels.cuda()
+
+    output = net(volumes, lengths)
+    losses = criterion(output, labels)
+
+    return {'test loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}, output
 
 
 def run(opt):
@@ -18,11 +98,11 @@ def run(opt):
     train_loader, test_loader = initialize_loaders(opt)
 
     # Initialize Network
-    net = load_or_init_models(crNN.crNN(130, 10, 1), opt).cuda()
+    net = load_or_init_models(models.crNN(130, 10, 1), opt).cuda()
 
     # Optimizers
     optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-    criterion = torch.nn.MSELoss()
+    criterion = torch.nn.CrossEntropyLoss()
     net_saver = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
 
     train_writer = SummaryWriter(log_dir=os.path.join(opt.checkpoint_dir, 'train'))
@@ -65,7 +145,7 @@ def run(opt):
             # Save model checkpoints
             net_saver.save_if_best(net, avg)
 
-def train(net, criterion, optimizer, data):
+def train(net, criterion, optimizer, data, opt):
     net.train()
     optimizer.zero_grad()
 
@@ -92,7 +172,7 @@ def benchmark(opt):
     train_loader, test_loader = initialize_loaders(opt)
 
     # Initialize net
-    net = load_or_init_models(crNN.crNN(130, 10, 1), opt).cuda()
+    net = load_or_init_models(models.crNN(130, 10, 1), opt).cuda()
 
     output = np.zeros(len(test_loader) + len(train_loader))
     label_glob = np.zeros(len(test_loader) + len(train_loader))
@@ -124,6 +204,8 @@ def benchmark(opt):
 def load_or_init_models(model, opt):
     if opt.net != '':
         model.load_state_dict(torch.load(opt.net))
+    if opt.cuda:
+        model = model.cuda()
     return model
 
 if __name__ == '__main__':
@@ -131,4 +213,4 @@ if __name__ == '__main__':
     if opt.benchmark:
         benchmark(opt)
     else:
-        run(opt)
+        run_audio(opt)

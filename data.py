@@ -7,6 +7,7 @@ import torch
 import skimage.transform
 from moviepy.editor import VideoFileClip
 from torch.utils.data import Dataset
+from torch.nn.utils.rnn import pad_sequence
 from torchvision import transforms
 
 
@@ -48,20 +49,92 @@ class VideoDataset(Dataset):
 
         return frames, volumes, label
 
+class AudioDataset(Dataset):
+    """
+    A Container for Highlight and non highlight clips.
+    Assumes a path to a text file containing paths to the clips.
+    i.e "filelist_train.txt", if one doesnt exist use 'OrganizeData' function.
+    Every highlight clip should start with HL and non highlight should start with NOHL
+    """
+
+    def __init__(self, path, transform=False):
+        with open(path, 'r') as f:
+            self.clips = f.read().splitlines()
+        # self.volumes = []
+        # self.labels = np.zeros(len(self.clips), dtype='float32')
+        # for i in range(len(self.clips)):
+        #     with VideoFileClip(self.clips[i]) as clip:
+        #         # Audio stream
+        #         cut = lambda i: clip.audio.subclip(i, i + 1).to_soundarray(fps=22000)
+        #         volume = lambda array: np.sqrt(((1.0 * array) ** 2).mean())
+        #         volumes = [volume(cut(i)) for i in range(0, int(clip.duration - 1))]
+        #         self.volumes.append(volumes)
+        #         self.labels[i] = 1 if os.path.basename(self.clips[i])[:2] == "HL" else 0
+
+        self.transform = None
+
+    def __len__(self):
+        return len(self.clips)
+
+    def __getitem__(self, idx):
+        # return self.volumes[idx], self.labels[idx], len(self.volumes[idx])
+        with VideoFileClip(self.clips[idx]) as clip:
+            # Audio stream
+            cut = lambda i: clip.audio.subclip(i, i + 1).to_soundarray(fps=22000)
+            volume = lambda array: np.sqrt(((1.0 * array) ** 2).mean())
+            volumes_arr = [volume(cut(i)) for i in range(0, int(clip.duration - 1))]
+            volumes = np.array(volumes_arr, dtype='float32')
+
+        #label = np.float32(1) if os.path.basename(self.clips[idx])[:2] == "HL" else np.float32(0)
+        label = np.array([0,1], dtype='float32') if os.path.basename(self.clips[idx])[:2] == "HL" else np.array([1,0], dtype='float32')
+        return volumes, label, len(volumes_arr)
 
 
-def initialize_loaders(args):
+def pad_collate_fn(batch):
+    """
+    args:
+        batch - list of (tensor, label)
+    reutrn:
+        xs - a tensor of all examples in 'batch' after padding
+        ys - a LongTensor of all labels in batch
+    """
+
+    # Sort batch by sequence length
+    batch.sort(key=lambda pair: len(pair[0]), reverse=True)
+
+    # Create a padded batch
+    ls = [pair[2] for pair in batch]
+    xs = pad_sequence([torch.Tensor(pair[0]) for pair in batch], batch_first=True)
+    ys = torch.Tensor([pair[1] for pair in batch])
+
+
+    return xs, ys, ls
+
+
+def initialize_loaders(args, type=0):
     kwargs = {'num_workers': args.workers, 'pin_memory': True} if args.cuda else {}
 
-    train_loader = torch.utils.data.DataLoader(
-        VideoDataset(args.train_data, transform=True),
-        batch_size=args.batch_size,
-        shuffle=True, **kwargs)
+    if (type==0):
+        train_loader = torch.utils.data.DataLoader(
+            VideoDataset(args.train_data, transform=True),
+            batch_size=args.batch_size,
+            shuffle=True, **kwargs)
 
-    test_loader = torch.utils.data.DataLoader(
-        VideoDataset(args.test_data, transform=False),
-        batch_size=args.batch_size,
-        shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(
+            VideoDataset(args.test_data, transform=False),
+            batch_size=args.batch_size,
+            shuffle=True, **kwargs)
+    if (type==1):
+        train_loader = torch.utils.data.DataLoader(
+            AudioDataset(args.train_data, transform=True),
+            batch_size=args.batch_size,
+            shuffle=True, collate_fn=pad_collate_fn, **kwargs)
+
+        test_loader = torch.utils.data.DataLoader(
+            AudioDataset(args.test_data, transform=False),
+            batch_size=args.batch_size,
+            shuffle=True, collate_fn=pad_collate_fn, **kwargs)
+
 
     return train_loader, test_loader
 

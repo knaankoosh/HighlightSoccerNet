@@ -74,6 +74,11 @@ def to_variables(tensors, cuda=None, device=None, test=False, **kwargs):
             variables[-1].requires_grad = False
     return variables
 
+def seed_all(opt):
+    print("Random Seed: ", opt.manualSeed)
+    random.seed(opt.manualSeed)
+    np.random.seed(opt.manualSeed)
+    torch.manual_seed(opt.manualSeed)
 
 def setup_cuda(opt):
     if torch.cuda.is_available() and opt.no_cuda:
