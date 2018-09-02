@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn import Conv3d
 import torch.nn.functional as F
 import torch.nn.utils as Utils
 from torch.autograd import Variable

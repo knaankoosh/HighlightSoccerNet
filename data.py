@@ -1,6 +1,4 @@
-import logging
-import random
-
+import math
 import numpy as np
 import os
 import torch
@@ -11,7 +9,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torchvision import transforms
 
 
-class VideoDataset(Dataset):
+class VideoDataset_OLD(Dataset):
     """
     A Container for Highlight and non highlight clips.
     Assumes a path to a text file containing paths to the clips.
@@ -49,9 +47,52 @@ class VideoDataset(Dataset):
 
         return frames, volumes, label
 
+class VideoDataset(Dataset):
+    """
+    A Container for Highlight and non highlight video streams.
+    Assumes a path to a text file containing paths to the clips.
+    i.e "filelist_train.txt", if one doesnt exist use 'OrganizeData' function.
+    Every highlight clip should start with HL and non highlight should start with NOHL
+    """
+
+    def __init__(self, path, fd, fh, fw, transform=False):
+        # Frame depth, height, width
+        self.fd = fd
+        self.fh = fh
+        self.fw = fw
+
+        # Read clip names from filelist
+        with open(path, 'r') as f:
+            self.clips = f.read().splitlines()
+
+        # Create transformation
+        self.transform = None
+        if transform:
+            self.transform = transforms.Compose([transforms.ToTensor(), transforms.Resize((256,256))])
+
+    def __len__(self):
+        return len(self.clips)
+
+    def __getitem__(self, idx):
+        with VideoFileClip(self.clips[idx]) as clip:
+            # Video stream
+            dur = clip.duration
+            fps = clip.fps
+            frames = np.zeros((self.fd, self.fh, self.fw, 3))
+            frame_cnt = 0
+            for i, frame in enumerate(clip.iter_frames(fps=fps)):
+                if i % math.floor(fps * dur / self.fd) == 0 and frame_cnt < self.fd:
+                    frames[frame_cnt] = skimage.transform.resize(frame, (self.fh, self.fw))
+                    frame_cnt = frame_cnt + 1
+            frames = frames.transpose([0, 3, 1, 2]).astype('float32')
+
+            label = np.array([0, 1], dtype='float32') if os.path.basename(self.clips[idx])[:2] == "HL" else np.array([1, 0], dtype='float32')
+
+        return frames, label
+
 class AudioDataset(Dataset):
     """
-    A Container for Highlight and non highlight clips.
+    A Container for Highlight and non highlight audio streams.
     Assumes a path to a text file containing paths to the clips.
     i.e "filelist_train.txt", if one doesnt exist use 'OrganizeData' function.
     Every highlight clip should start with HL and non highlight should start with NOHL
@@ -89,7 +130,6 @@ class AudioDataset(Dataset):
         label = np.array([0,1], dtype='float32') if os.path.basename(self.clips[idx])[:2] == "HL" else np.array([1,0], dtype='float32')
         return volumes, label, len(volumes_arr)
 
-
 def pad_collate_fn(batch):
     """
     args:
@@ -109,7 +149,6 @@ def pad_collate_fn(batch):
 
 
     return xs, ys, ls
-
 
 def initialize_loaders(args, type=0):
     kwargs = {'num_workers': args.workers, 'pin_memory': True} if args.cuda else {}

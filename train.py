@@ -62,7 +62,6 @@ def run_audio(opt):
             # Save model checkpoints
             net_saver.save_if_best(net, avg)
 
-
 def train_audio(net, criterion, optimizer, data, opt):
     net.train()
     optimizer.zero_grad()
@@ -91,7 +90,6 @@ def test_audio(net, criterion, data, opt):
     losses = criterion(output, labels)
 
     return {'test loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}, output
-
 
 def run(opt):
     # Initialize DataLoaders
