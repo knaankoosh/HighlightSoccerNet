@@ -38,7 +38,7 @@ def parse_args():
 
     # Data pipeline and data augmentation
     data_grp = parser.add_argument_group('data pipeline')
-    data_grp.add_argument('--workers', type=int, help='number of data loading workers', default=4)
+    data_grp.add_argument('--workers', type=int, help='number of data loading workers', default=3)
     data_grp.add_argument('--batch_size', default=2, type=int, help='size of a batch for each gradient update.')
     data_grp.add_argument('--rotate', action="store_true", help='rotate data augmentation.')
     data_grp.add_argument('--flipud', action="store_true", help='flip up/down data augmentation.')
@@ -121,7 +121,7 @@ def update_stats(stats, measurments):
 
 class ModelSaver:
     def __init__(self, path):
-        self.best = float('inf')
+        self.best = 0
         self.path = path
         self.epoch = 0
 
@@ -129,6 +129,6 @@ class ModelSaver:
         self.epoch += 1
         os.makedirs(os.path.join(self.path, model.__class__.__name__), exist_ok=True)
         torch.save(model.state_dict(), os.path.join(self.path, model.__class__.__name__, 'last_model.checkpoint'))
-        if loss < self.best:
+        if loss > self.best:
             self.best = loss
             torch.save(model.state_dict(), os.path.join(self.path, model.__class__.__name__, 'best_model.checkpoint'))

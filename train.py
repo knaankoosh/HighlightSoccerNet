@@ -19,8 +19,8 @@ def run_audio(opt):
     net = load_or_init_models(models.crNN_audio(1, 10, 2), opt).cuda()
 
     # Optimizers
-    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-    # optimizer = torch.optim.SGD(net.parameters(), lr=0.0002)
+    #optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr)
     criterion = torch.nn.BCELoss()
     net_saver = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
 
@@ -91,16 +91,16 @@ def test_audio(net, criterion, data, opt):
 
     return {'test loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}, output
 
-def run(opt):
+def run_video(opt):
     # Initialize DataLoaders
-    train_loader, test_loader = initialize_loaders(opt)
+    train_loader, test_loader = initialize_loaders(opt, type=0)
 
     # Initialize Network
-    net = load_or_init_models(models.crNN(130, 10, 1), opt).cuda()
+    net = load_or_init_models(models.crNN_video(), opt).cuda()
 
     # Optimizers
-    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr)
+    criterion = torch.nn.BCELoss()
     net_saver = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
 
     train_writer = SummaryWriter(log_dir=os.path.join(opt.checkpoint_dir, 'train'))
@@ -110,9 +110,10 @@ def run(opt):
         # Training
         avg_stats = defaultdict(float)
         for i, data in enumerate(train_loader):
-            data = to_variables(data, cuda=opt.cuda, device=opt.device)
-            loss = train(net, criterion, optimizer, data, opt)
+            loss = train_video(net, criterion, optimizer, data, opt)
             update_stats(avg_stats, loss)
+            del loss
+            torch.cuda.empty_cache()
 
         # Log training progress
         str_out = '[train] {}/{} '.format(epoch, opt.n_epochs)
@@ -126,9 +127,8 @@ def run(opt):
         avg_stats = defaultdict(float)
         with torch.no_grad():
             for i, data in enumerate(test_loader):
-                data = to_variables(data, cuda=opt.cuda, device=opt.device, test=True)
-                losses = test(net, criterion, data, opt)
-                update_stats(avg_stats, losses)
+                loss, output = test_video(net, criterion, data, opt)
+                update_stats(avg_stats, loss)
 
         # Log testing progress
         str_out = '[test] {}/{} '.format(epoch, opt.n_epochs)
@@ -143,28 +143,121 @@ def run(opt):
             # Save model checkpoints
             net_saver.save_if_best(net, avg)
 
-def train(net, criterion, optimizer, data, opt):
+def train_video(net, criterion, optimizer, data, opt):
     net.train()
     optimizer.zero_grad()
 
-    frames, volumes, labels = data
-    output = Variable(net(frames[0], volumes[0]), requires_grad=True)
+    frames, labels = data
+    if opt.cuda:
+        frames = frames.cuda()
+        labels = labels.cuda()
+
+    output = net(frames)
     losses = criterion(output, labels)
     losses.backward()
     optimizer.step()
 
-    return {'train loss': losses.mean()}
+    return {'train loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}
 
-def test(net, criterion, data, opt, lambda_pixel=100):
+def test_video(net, criterion, data, opt):
     net.eval()
 
-    frames, volumes, labels = data
-    frame = frames[0]
-    audio = volumes[0]
-    output = net(frame, audio)
+    frames, labels = data
+    if opt.cuda:
+        frames = frames.cuda()
+        labels = labels.cuda()
+
+    output = net(frames)
     losses = criterion(output, labels)
 
-    return {'test loss': losses.mean()}
+    return {'test loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}, output
+
+def run_comb(opt):
+    # Initialize DataLoaders
+    train_loader, test_loader = initialize_loaders(opt, type=2)
+
+    # Initialize Network
+    net = load_or_init_models(models.C3RNN(32, 1, 10, 2), opt).cuda()
+
+    # Optimizers
+    # optimizer = torch.optim.SGD(net.parameters(), lr=opt.lr, momentum=0.9, weight_decay=0.999)
+    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr)
+    criterion = torch.nn.BCELoss()
+    net_saver = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
+
+    train_writer = SummaryWriter(log_dir=os.path.join(opt.checkpoint_dir, 'train'))
+    test_writer = SummaryWriter(log_dir=os.path.join(opt.checkpoint_dir, 'test'))
+
+    for epoch in tqdm(range(opt.epoch, opt.n_epochs), desc='Training'):
+        # Training
+        avg_stats = defaultdict(float)
+        for i, data in enumerate(train_loader):
+            loss = train_comb(net, criterion, optimizer, data, opt)
+            update_stats(avg_stats, loss)
+            del loss
+            torch.cuda.empty_cache()
+
+        # Log training progress
+        str_out = '[train] {}/{} '.format(epoch, opt.n_epochs)
+        for k, v in avg_stats.items():
+            avg = v / len(train_loader)
+            train_writer.add_scalar(k, avg, epoch)
+            str_out += '{}: {:.6f}  '.format(k, avg)
+        print(str_out)
+
+        # Testing
+        avg_stats = defaultdict(float)
+        with torch.no_grad():
+            for i, data in enumerate(test_loader):
+                loss, output = test_comb(net, criterion, data, opt)
+                update_stats(avg_stats, loss)
+
+        # Log testing progress
+        str_out = '[test] {}/{} '.format(epoch, opt.n_epochs)
+        avg = 0
+        for k, v in avg_stats.items():
+            avg = v / len(test_loader)
+            test_writer.add_scalar(k, avg, epoch)
+            str_out += '{}: {:.6f}  '.format(k, avg)
+        print(str_out)
+
+        if epoch % opt.checkpoint_interval == 0:
+            # Save model checkpoints
+            net_saver.save_if_best(net, avg)
+
+def train_comb(net, criterion, optimizer, data, opt):
+    net.train()
+    optimizer.zero_grad()
+
+    volumes, labels, lengths, frames = data
+    if opt.cuda:
+        volumes = volumes.cuda()
+        frames = frames.cuda()
+        labels = labels.cuda()
+
+    output = net(frames, volumes, lengths)
+    losses = criterion(output, labels)
+    losses.backward()
+    optimizer.step()
+
+    return {'train loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}
+
+def test_comb(net, criterion, data, opt):
+    net.eval()
+
+    volumes, labels, lengths, frames = data
+    if opt.cuda:
+        volumes = volumes.cuda()
+        frames = frames.cuda()
+        labels = labels.cuda()
+
+    output = net(frames, volumes, lengths)
+    losses = criterion(output, labels)
+
+    return {'test loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}, output
+
+
+
 
 def benchmark(opt):
     train_loader, test_loader = initialize_loaders(opt)
@@ -211,4 +304,6 @@ if __name__ == '__main__':
     if opt.benchmark:
         benchmark(opt)
     else:
-        run_audio(opt)
+        #run_audio(opt)
+        #run_video(opt)
+        run_comb(opt)
