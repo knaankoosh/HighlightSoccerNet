@@ -30,6 +30,7 @@ def parse_args():
     # loading pretrained nets
     parser.add_argument('--net', default='', help="path to the pretrained model")
     parser.add_argument('--benchmark', action='store_true', help="enables benchmarking")
+    parser.add_argument('--summary', action='store_true', help="enables summarization")
 
     # GPU args
     parser.add_argument('--no-cuda', action='store_true', help='disables cuda')

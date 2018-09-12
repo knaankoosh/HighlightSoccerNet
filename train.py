@@ -7,8 +7,12 @@ from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 from data import initialize_loaders
-from main import setup_main, to_variables, ModelSaver, update_stats
+from main import setup_main, ModelSaver, update_stats
 import models
+
+import skimage.transform
+from sklearn.metrics import classification_report
+from moviepy.editor import VideoFileClip, concatenate
 
 
 def run_audio(opt):
@@ -19,8 +23,8 @@ def run_audio(opt):
     net = load_or_init_models(models.crNN_audio(1, 10, 2), opt).cuda()
 
     # Optimizers
-    #optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
-    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr)
+    optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr, betas=(opt.b1, opt.b2))
+    #optimizer = torch.optim.Adam(net.parameters(), lr=opt.lr)
     criterion = torch.nn.BCELoss()
     net_saver = ModelSaver(f'{opt.checkpoint_dir}/saved_models/{opt.name}')
 
@@ -256,42 +260,6 @@ def test_comb(net, criterion, data, opt):
 
     return {'test loss': losses.sum(), 'accuracy': (labels == output.round()).cpu().numpy().astype(bool).all(1).mean()}, output
 
-
-
-
-def benchmark(opt):
-    train_loader, test_loader = initialize_loaders(opt)
-
-    # Initialize net
-    net = load_or_init_models(models.crNN(130, 10, 1), opt).cuda()
-
-    output = np.zeros(len(test_loader) + len(train_loader))
-    label_glob = np.zeros(len(test_loader) + len(train_loader))
-    idx = 0
-    with torch.no_grad():
-        for i, data in enumerate(train_loader):
-            data = to_variables(data, cuda=opt.cuda, device=opt.device, test=True)
-            frames, volumes, labels = data
-            frame = frames[0]
-            audio = volumes[0]
-            output[idx] = net(frame, audio)
-            label_glob[idx] = labels[0]
-            idx = idx + 1
-
-
-        for i, data in enumerate(test_loader):
-            data = to_variables(data, cuda=opt.cuda, device=opt.device, test=True)
-            frames, volumes, labels = data
-            frame = frames[0]
-            audio = volumes[0]
-            output[idx] = net(frame, audio)
-            label_glob[idx] = labels[0]
-            idx = idx + 1
-
-    final_tag = np.round(output)
-
-    return final_tag
-
 def load_or_init_models(model, opt):
     if opt.net != '':
         model.load_state_dict(torch.load(opt.net))
@@ -301,9 +269,11 @@ def load_or_init_models(model, opt):
 
 if __name__ == '__main__':
     opt = setup_main()
-    if opt.benchmark:
+    if opt.summary:
+        create_summary(opt)
+    elif opt.benchmark:
         benchmark(opt)
     else:
-        #run_audio(opt)
+        run_audio(opt)
         #run_video(opt)
-        run_comb(opt)
+        #run_comb(opt)
